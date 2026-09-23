@@ -1,0 +1,24 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: MoonbitHub/moon-setup@v1
+        with:
+          moon-version: latest
+      - name: Check
+        run: moon check
+      - name: Test (DSP library)
+        run: moon test
+      - name: Build wasm kernel
+        run: moon build --target wasm
+      - name: Kernel smoke test
+        run: |
+          cp _build/wasm/debug/build/src/kernel/kernel.wasm web/synth.wasm
+          node web/test-kernel.mjs

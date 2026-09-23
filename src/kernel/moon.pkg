@@ -1,0 +1,15 @@
+pkgtype(kind: "foreign_library")
+
+import {
+  "SDJM5/moonsynth/src/lib",
+  "moonbitlang/core/ref",
+}
+
+options(
+  link: {
+    "wasm": {
+      "export-memory-name": "memory",
+      "memory-limits": { "min": 4096, "max": 4096 },
+    },
+  },
+)

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>moonsynth — MoonBit wasm 合成器机架</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="logo"></span>
+    <h1>moonsynth</h1>
+    <span class="tagline">MoonBit → WebAssembly DSP · AudioWorklet 实时驱动</span>
+  </div>
+  <div class="header-right">
+    <span id="voice-badge" class="badge" title="当前发声声部数">VOICES 0/8</span>
+    <button id="panic-btn" class="ghost-btn" title="立即停止所有声部">■ PANIC</button>
+    <button id="power-btn" class="power-btn">▶ 启动音频</button>
+  </div>
+</header>
+
+<main>
+  <section id="status-strip">
+    <span id="status-text">音频未启动 — 点击「启动音频」（浏览器要求一次用户手势）</span>
+    <span id="sr-text"></span>
+  </section>
+
+  <section class="rack">
+    <div class="module" id="mod-osc">
+      <h2>OSCILLATORS</h2>
+      <div class="module-body">
+        <div class="sub">
+          <h3>OSC 1</h3>
+          <div class="wave-select" data-param="0">
+            <button data-value="0">SIN</button><button data-value="1">TRI</button><button data-value="2">SAW</button><button data-value="3">SQR</button>
+          </div>
+          <div class="knob-slot" data-knob="osc1_detune"></div>
+        </div>
+        <div class="sub">
+          <h3>OSC 2</h3>
+          <div class="wave-select" data-param="2">
+            <button data-value="0">SIN</button><button data-value="1">TRI</button><button data-value="2">SAW</button><button data-value="3">SQR</button>
+          </div>
+          <div class="knob-slot" data-knob="osc2_detune"></div>
+          <div class="knob-slot" data-knob="osc2_mix"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="module" id="mod-filter">
+      <h2>FILTER</h2>
+      <div class="module-body">
+        <div class="type-select" data-param="5">
+          <button data-value="0">LP</button><button data-value="1">HP</button><button data-value="2">BP</button>
+        </div>
+        <div class="knob-slot" data-knob="cutoff"></div>
+        <div class="knob-slot" data-knob="q"></div>
+      </div>
+    </div>
+
+    <div class="module" id="mod-env">
+      <h2>ENVELOPE</h2>
+      <div class="module-body">
+        <div class="knob-slot" data-knob="attack"></div>
+        <div class="knob-slot" data-knob="decay"></div>
+        <div class="knob-slot" data-knob="sustain"></div>
+        <div class="knob-slot" data-knob="release"></div>
+      </div>
+    </div>
+
+    <div class="module" id="mod-fx">
+      <h2>DELAY / OUT</h2>
+      <div class="module-body">
+        <div class="knob-slot" data-knob="delay_time"></div>
+        <div class="knob-slot" data-knob="delay_fb"></div>
+        <div class="knob-slot" data-knob="delay_mix"></div>
+        <div class="knob-slot" data-knob="master"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="rack rack-lower">
+    <div class="module module-wide" id="mod-visual">
+      <h2>SCOPE / SPECTRUM</h2>
+      <canvas id="scope" width="900" height="180"></canvas>
+    </div>
+    <div class="module" id="mod-presets">
+      <h2>PRESETS</h2>
+      <div class="preset-list">
+        <button data-preset="init">Init Saw</button>
+        <button data-preset="bass">Fat Bass</button>
+        <button data-preset="pad">Dreamy Pad</button>
+        <button data-preset="pluck">Pluck</button>
+        <button data-preset="acid">Acid 303</button>
+      </div>
+      <div class="selftest">
+        <button id="selftest-btn">⚙ 运行离线自检</button>
+        <pre id="selftest-out"></pre>
+      </div>
+    </div>
+  </section>
+
+  <section id="keyboard-section">
+    <div class="kbd-header">
+      <span>KEYBOARD <span class="hint">(键盘 A W S E D F T G Y H U J K …，Z / X 切换八度)</span></span>
+      <span id="octave-label">OCT C3–C5</span>
+    </div>
+    <div id="keyboard"></div>
+  </section>
+
+  <footer>
+    <span>振荡器 / 滤波 / 包络 / 延迟全部由 MoonBit 编译为 wasm，在音频线程逐样本渲染 ·
+      <a href="https://github.com/sdjm5/moonsynth" target="_blank" rel="noreferrer">github.com/sdjm5/moonsynth</a></span>
+  </footer>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
