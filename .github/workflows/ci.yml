@@ -9,9 +9,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: MoonbitHub/moon-setup@v1
+      - uses: actions/setup-node@v4
         with:
-          moon-version: latest
+          node-version: 20
+      - name: Setup MoonBit
+        uses: moonbit-community/setup-moonbit@main
       - name: Check
         run: moon check
       - name: Test (DSP library)
