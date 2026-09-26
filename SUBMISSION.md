@@ -1,59 +1,40 @@
-# moonsynth · 黑客松申报书
+# MoonBit 复音合成器项目申报书
 
-## 一、项目简介
+## 一、项目名称
 
-**moonsynth —— 浏览器端复音合成器机架，DSP 内核全部由 MoonBit 编译为 WebAssembly。**
-振荡器、双二阶滤波、ADSR 包络、乒乓延迟逐样本运行在真实音频线程（AudioWorklet）的 wasm 里；屏幕旋钮实时拧参数、计算机键盘/屏上键盘弹奏、五组预置音色、示波器与频谱实时可视化，另有一键离线自检——不用耳朵也能自动断言 DSP 的物理正确性。
+moonsynth：MoonBit 复音合成器（浏览器端 wasm DSP）
 
-## 二、背景与动机
+## 二、项目说明
 
-- 浏览器音频生态里 DSP 要么用 JS 写（GC 抖动、JIT 不稳定），要么用 C/Rust 编译（工具链重、和 Web 语义隔阂）。MoonBit 生成高质量 wasm，但「音频这种无分配、硬实时、小帧预算」的场景还没有现成的 MoonBit 先例——我们想把它做出来。
-- 关键技术未知数有三个：AudioWorklet 音频线程里怎么加载 wasm；控制事件与音频数据怎么过边界；渲染路径怎么做到零分配以免 GC 打断实时线程。三个都解决并沉淀为文档。
-- 目标是把「MoonBit 能做硬实时多媒体」变成一个拧个旋钮就能听见、看得见波形、还能自动验证的现场演示。
+合成器由 DSP 库、wasm 内核与 Web 宿主三部分构成。本项目（0.1.0）以 MoonBit 实现 DSP 库与内核：PolyBLEP 抗混叠振荡器（锯齿/方波断点两样本多项式修正，正弦、三角为朴素实现）、RBJ 双二阶滤波（LP/HP/BP，系数仅参数变化时重算）、线性 ADSR（释放速率在 gate-off 时刻锁定）、双环形缓冲乒乓延迟与 8 声部管理（同音重触、空闲声部复用、最老声部偷取）。内核为 wasm foreign_library，逐块渲染交织立体声样本写入导出线性内存，控制事件为普通导出函数调用，声部、暂存缓冲、延迟环全部预分配，渲染路径零分配。宿主为 AudioWorklet：主线程编译 wasm 字节经 MessagePort 送入音频线程实例化，每帧取音一次、拷贝一次，60 Hz 计时。
 
-## 三、功能亮点
+## 三、核心功能
 
-- **8 复音合成器**：双振荡器（正弦/三角/锯齿/方波，独立失谐 cents、可混音）→ 全局滤波（LP/HP/BP + 共振）→ 每声部 ADSR → 主控 → **乒乓延迟**（左右交替回声）。
-- **机架 UI**：13 个可拖拽旋钮（纵拖、双击复位、对数/线性曲线、实时数值读出）、波形/滤波类型分段开关、5 组预置（Fat Bass / Dreamy Pad / Pluck / Acid 303…）、PANIC 立即静音。
-- **双输入键盘**：屏上钢琴键（鼠标/触摸，按住滑奏）+ 计算机键盘 DAW 式映射（A W S E D…，Z/X 切八度）。
-- **实时可视化**：示波器波形 + 对数频谱同屏，复音数徽章（VOICES n/8）每半秒从音频线程回报。
-- **离线自检**：OfflineAudioContext 渲染同一 wasm 引擎并断言三件事——攻击段有声（RMS 0.25 > 0.02）、释放后精确静音（RMS 0.00000）、C4 正弦过零率 270/s（理论 261.6）。
+- 完整信号链：双振荡器（波形/失谐分/混合）→ 声部求和 → 全局滤波（LP/HP/BP + 共振 Q）→ 主控 → 乒乓延迟（左右交替回声，反馈 0–0.9，回声间隔至 1 秒）→ 立体声输出。
+- 8 复音与声部策略：按音符重触、空闲声部优先、最老声部偷取；`voice_count` 每半秒回报 UI。
+- 16 个参数即时生效：振荡器波形与失谐（分）、滤波类型/截止/共振、ADSR 四段、延迟时间/反馈/湿度、主控增益；包络参数对已发声声部同步，释放从起始电平线性下降不产生爆音。
+- 确定性自检：页面内置离线渲染自检，攻击段 RMS 0.2531（>0.02）、释放后 RMS 0.00000（<0.001）、C4 正弦过零率 270/秒（理论 261.6）；Node 端内核测试 10 项含 C4 实测 258.4 Hz（含 −7 音分失谐）。
+- 吞吐：8 复音全响渲染 10 秒立体声 113.9 毫秒，实时余量约 88 倍。
+- 控制台 UI：13 个可拖拽旋钮（对数/线性曲线、双击复位）、5 组预置音色、屏上 25 键 + 计算机键盘（A W S E D…，Z/X 切八度）、示波器与对数频谱、PANIC 立即静音。
 
-## 四、技术架构与实现（MoonBit 技术要点）
+## 四、预期使用场景
 
-1. **`src/lib`** — 纯 MoonBit 可移植 DSP 库：PolyBLEP 振荡器（两采样多项式带限阶跃修正抗混叠）、RBJ 食谱双二阶滤波、线性 ADSR（释放速率在 gate-off 时刻锁定）、双环形缓冲乒乓延迟、8 声部管理（同音重触/空闲复用/最老偷取）。15 个单元测试。
-2. **`src/kernel`** — wasm `foreign_library`：`moon_init / note_on / note_off / set_param / panic / voice_count / render`。音频数据经导出线性内存的约定地址整块写出（交织立体声 f32），控制事件是普通导出函数调用——零分配、零拷贝、零锁。
-3. **`web/`** — 机架 UI + `audio-worklet.js`（worklet 侧实例化 wasm、逐块取音、回报复音数）+ 零依赖服务器。
+**场景一：浏览器演奏。** `moon build --target wasm --release`、`cp _build/wasm/release/build/src/kernel/kernel.wasm web/synth.wasm`、`node web/server.mjs 8090` 后打开页面，点「启动音频」（浏览器要求一次用户手势）→ 选预置音色 → 计算机键盘直接弹奏，`Z`/`X` 切换八度，拖动旋钮实时改音色。
 
-**关键技术攻关**（三个未知数逐个实验探明）：
+**场景二：无耳自动验证。** `node web/test-kernel.mjs` 在无浏览器环境下对 wasm 内核跑 10 项断言：未发声时静音、C4 频率落窗、复音上限、panic 后峰值恰为 0、释放尾静音、实时余量；页面「运行离线自检」按钮经 OfflineAudioContext 走同一 wasm 验证包络与音高，适用于无音频设备的 CI 环境。
 
-- **worklet 里没有 `fetch` 也没有 `URL`**（内嵌 Chromium 的 AudioWorklet 全局作用域异常精简）——改为**主线程编译 wasm、字节流经 `postMessage` 传入**（`ArrayBuffer` 可结构化克隆），worklet 用裸 `WebAssembly` 实例化。首个静音渲染正是这条路探出来的。
-- **OfflineAudioContext 渲染期间不泵 worklet 消息队列**——控制事件必须在 `startRendering()` 前送达并等待处理；包络只在 `process()` 内推进，因此提前 `note_on` 不会偷跑时序。
-- **零分配渲染路径**：声部、暂存缓冲、延迟环全部预分配，每块渲染不分配任何对象，wasm GC 永不在音频线程中途打断。
-- 另附 MoonBit 工程实录：`init` 是保留的特殊函数名（必须无参），导出构造器改名 `moon_init`；`pub` 类型对测试块只读，数据枚举需 `pub(all)`。
+**场景三：程序化控制。** 宿主经 worklet MessagePort 逐条下发 `{type:'note_on', note, vel}`、`{type:'note_off', note}`、`{type:'param', id, value}`，与 Web MIDI 桥接即为硬件键盘接入路径；`{type:'panic'}` 一条消息静音全部声部。
 
-## 五、性能与验证
+**场景四：DSP 组件复用。** `src/lib` 为纯 MoonBit、零依赖，可在任意后端单独编译；PolyBLEP 振荡器、RBJ 滤波、ADSR、乒乓延迟均为独立结构体，供其他 MoonBit 音频项目直接取用。
 
-- **吞吐**：8 复音全响渲染 10 秒立体声音频约 130 ms（Node，debug 构建）——**约 75 倍实时余量**（实时要求 >1×），逐块渲染零分配。
-- **质量门槛全绿**：`moon check` 零警告；`moon test` 15/15（包络时序精确值、滤波器 DC 增益恰为 1、延迟回声落在第 50/100/150 采样、PolyBLEP 最大跳变 1.98→1.48、复音上限/偷取/panic）。
-- **真实浏览器端到端**：48 kHz、10 ms 基础延迟实时运行；按和弦 VOICES 4/8；示波器/频谱实时跳动；离线自检 PASS（0.25 / 0.00000 / 270）。
-- **延迟测试数据都是实测**：`render` 在 Node 与浏览器同一 wasm 上验证。
+## 五、方向与通用性
 
-## 六、运行与演示
+属应用工具/实时多媒体方向，同时是 MoonBit 音频实时性的参考工程。AudioWorklet 与 wasm 的边界方案（主线程编译字节经 postMessage 入 worklet、线性内存整块取音）可直接迁移到任何 wasm 实时音频项目；开发中实测的两条平台限制——该 worklet 全局作用域无 `fetch`/`URL`、OfflineAudioContext 渲染期间不泵 worklet 消息队列——已写入代码注释，对他人在同一环境避坑有直接参考价值。
 
-```bash
-moon build --target wasm
-cp _build/wasm/debug/build/src/kernel/kernel.wasm web/synth.wasm
-node web/server.mjs 8090
-# 打开 http://127.0.0.1:8090
-```
+## 六、验证与原创性说明
 
-30 秒演示脚本：点「▶ 启动音频」→ 选 **Dreamy Pad** → 按住几个键铺底，看示波器与频谱 → 切 **Acid 303** 拧大 RESO、压低 CUTOFF，听共振扫频 → 用计算机键盘弹旋律 → 点 **⚙ 运行离线自检** 看三条 DSP 断言当场通过。
+`moon check` 零警告；DSP 库 15 组单元测试通过（闭式断言：包络按采样数精确到位、滤波器脉冲响应和恰为 1、延迟回声落在第 50/100/150 采样、方波 PolyBLEP 符号经数值实验确定无过冲）；内核测试 10 项、浏览器离线自检 3 项与真实演奏均通过；CI（moonbit-community/setup-moonbit）绿灯。信号链为合成器通行结构，PolyBLEP 与 RBJ 系数为公开算法（分别源自 music-dsp 社区惯例与 Audio EQ Cookbook），实现从零手写，未复制任何现有合成器或 DSP 库代码。README 如实声明：吞吐为同权重同算法的测量，非音质评价；暂未实现 MIDI 硬件接入、录音导出与更多效果器，列入后续计划。项目源码采用 Apache-2.0 许可证。
 
-## 七、展望
+## 七、仓库链接
 
-- **效果器扩展**：混响（Freeverb 梳理/全通网络）、失真、合唱——同一条音频总线继续挂模块；
-- **序列器**：步进音序 + 包络自动化，让 demo 脱手演奏；
-- **参数自动化总线**：把 `set_param` 升级为音频速率参数（worklet AudioParam 直接采样）；
-- **MIDI**：Web MIDI API 接入硬件键盘；
-- **生态**：把 `src/lib` 发到 mooncakes.io，作为 MoonBit 的基础 DSP 组件库。
+https://github.com/sdjm5/moonsynth
