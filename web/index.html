@@ -104,10 +104,44 @@
         <button data-preset="pad">Dreamy Pad</button>
         <button data-preset="pluck">Pluck</button>
         <button data-preset="acid">Acid 303</button>
+        <button data-preset="arp">Arp Pluck</button>
       </div>
       <div class="selftest">
         <button id="selftest-btn">⚙ 运行离线自检</button>
         <pre id="selftest-out"></pre>
+      </div>
+    </div>
+  </section>
+
+  <section class="rack rack-arp">
+    <div class="module" id="mod-arp">
+      <h2>ARPEGGIATOR</h2>
+      <div class="module-body">
+        <div class="col">
+          <button id="arp-toggle" class="toggle-btn">ARP OFF</button>
+          <div class="type-select" id="arp-modes">
+            <button data-value="0" class="on">UP</button><button data-value="1">DN</button><button data-value="2">U/D</button><button data-value="3">RND</button><button data-value="4">PLAY</button>
+          </div>
+          <label class="ctl chk"><input type="checkbox" id="arp-latch"> LATCH 保持</label>
+          <div class="hint" id="arp-readout">steps 0 · held 0 · gated 0</div>
+        </div>
+        <div class="knob-slot" data-knob="arp_rate"></div>
+        <div class="knob-slot" data-knob="arp_octaves"></div>
+        <div class="knob-slot" data-knob="arp_gate"></div>
+      </div>
+    </div>
+
+    <div class="module" id="mod-io">
+      <h2>RECORD / MIDI</h2>
+      <div class="module-body">
+        <div class="col">
+          <button id="rec-btn" class="toggle-btn">⏺ 录音</button>
+          <div class="hint" id="rec-readout">未录音（上限 60 秒，输出 WAV）</div>
+        </div>
+        <div class="col">
+          <button id="midi-btn" class="toggle-btn">🎹 连接 MIDI</button>
+          <div class="hint" id="midi-readout">未连接 — 支持硬件键盘</div>
+        </div>
       </div>
     </div>
   </section>

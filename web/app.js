@@ -30,6 +30,12 @@ const state = {
     19: 0.8, // reverb stereo width
     20: 0.0, // drive amount (off)
     21: 0.0, // drive mix
+    22: 0, // arp off
+    23: 8, // arp rate, steps/s
+    24: 0, // arp mode: up
+    25: 1, // arp octaves
+    26: 0.6, // arp gate
+    27: 0, // arp latch off
   },
   audio: null,     // { ctx, node, analyser }
   baseOctave: 48,  // C3, MIDI note of the leftmost key
@@ -57,6 +63,9 @@ const KNOBS = {
   reverb_mix: { id: 18, label: 'WET', min: 0, max: 1, curve: 'lin', fmt: pct },
   drive: { id: 20, label: 'DRIVE', min: 0, max: 1, curve: 'lin', fmt: pct },
   drive_mix: { id: 21, label: 'MIX', min: 0, max: 1, curve: 'lin', fmt: pct },
+  arp_rate: { id: 23, label: 'RATE', min: 0.5, max: 40, curve: 'log', fmt: (v) => v.toFixed(1) + '/s' },
+  arp_octaves: { id: 25, label: 'OCT', min: 1, max: 4, curve: 'lin', fmt: (v) => String(Math.round(v)), quantize: 1 },
+  arp_gate: { id: 26, label: 'GATE', min: 0.05, max: 1, curve: 'lin', fmt: pct },
   master: { id: 15, label: 'MASTER', min: 0, max: 1, curve: 'lin', fmt: v => (v * 100).toFixed(0) + '%' },
 };
 
@@ -80,8 +89,12 @@ function valueToNorm(def, v) {
 }
 
 function setParam(id, value, { fromPreset = false } = {}) {
-  state.params[id] = value;
-  if (state.audio) state.audio.node.port.postMessage({ type: 'param', id, value });
+  // knobs marked quantize snap to that step (the octave range is 1..4)
+  const def = Object.values(KNOBS).find((k) => k.id === id);
+  const q = def && def.quantize ? def.quantize : 0;
+  const v = q > 0 ? Math.round(value / q) * q : value;
+  state.params[id] = v;
+  if (state.audio) state.audio.node.port.postMessage({ type: 'param', id, value: v });
   if (!fromPreset) syncControlsFromState();
 }
 
@@ -164,18 +177,20 @@ document.querySelectorAll('.wave-select, .type-select').forEach((group) => {
 function syncControlsFromState() {
   document.querySelectorAll('.knob').forEach((k) => k.paint && k.paint());
   paintSegmented();
+  paintArp(); // the arpeggiator panel reads the same param table
 }
 
 // ---------------------------------------------------------------------------
 // presets
 
 const PRESETS = {
-  init: [[0,2],[1,-7],[2,3],[3,7],[4,0.5],[5,0],[6,12000],[7,0.8],[8,0.01],[9,0.15],[10,0.6],[11,0.25],[12,0.22],[13,0.3],[14,0.18],[15,0.7],[16,0.7],[17,0.35],[18,0],[19,0.8],[20,0],[21,0]],
-  bass: [[0,2],[1,-5],[2,3],[3,5],[4,0.6],[5,0],[6,900],[7,1.2],[8,0.003],[9,0.2],[10,0.4],[11,0.12],[12,0.2],[13,0.2],[14,0.0],[15,0.75],[16,0.5],[17,0.5],[18,0],[19,0.8],[20,0.18],[21,0.5]],
-  pad: [[0,1],[1,-8],[2,2],[3,1200],[4,0.5],[5,0],[6,3500],[7,0.6],[8,0.8],[9,0.5],[10,0.8],[11,1.6],[12,0.38],[13,0.45],[14,0.35],[15,0.6],[16,0.9],[17,0.25],[18,0.55],[19,1],[20,0],[21,0]],
-  pluck: [[0,3],[1,0],[2,0],[3,7],[4,0.3],[5,0],[6,2400],[7,2.5],[8,0.002],[9,0.25],[10,0.0],[11,0.3],[12,0.29],[13,0.35],[14,0.22],[15,0.8],[16,0.6],[17,0.45],[18,0.32],[19,0.9],[20,0.12],[21,0.35]],
-  acid: [[0,2],[1,0],[2,2],[3,5],[4,0.35],[5,0],[6,600],[7,8],[8,0.002],[9,0.18],[10,0.15],[11,0.1],[12,0.25],[13,0.4],[14,0.3],[15,0.7],[16,0.45],[17,0.5],[18,0.15],[19,0.7],[20,0.8],[21,0.9]],
+  init: [[0,2],[1,-7],[2,3],[3,7],[4,0.5],[5,0],[6,12000],[7,0.8],[8,0.01],[9,0.15],[10,0.6],[11,0.25],[12,0.22],[13,0.3],[14,0.18],[15,0.7],[16,0.7],[17,0.35],[18,0],[19,0.8],[20,0],[21,0],[22,0],[23,8],[24,0],[25,1],[26,0.6],[27,0]],
+  bass: [[0,2],[1,-5],[2,3],[3,5],[4,0.6],[5,0],[6,900],[7,1.2],[8,0.003],[9,0.2],[10,0.4],[11,0.12],[12,0.2],[13,0.2],[14,0.0],[15,0.75],[16,0.5],[17,0.5],[18,0],[19,0.8],[20,0.18],[21,0.5],[22,0],[23,10],[24,0],[25,1],[26,0.5],[27,0]],
+  pad: [[0,1],[1,-8],[2,2],[3,1200],[4,0.5],[5,0],[6,3500],[7,0.6],[8,0.8],[9,0.5],[10,0.8],[11,1.6],[12,0.38],[13,0.45],[14,0.35],[15,0.6],[16,0.9],[17,0.25],[18,0.55],[19,1],[20,0],[21,0],[22,0],[23,6],[24,0],[25,1],[26,0.8],[27,0]],
+  pluck: [[0,3],[1,0],[2,0],[3,7],[4,0.3],[5,0],[6,2400],[7,2.5],[8,0.002],[9,0.25],[10,0.0],[11,0.3],[12,0.29],[13,0.35],[14,0.22],[15,0.8],[16,0.6],[17,0.45],[18,0.32],[19,0.9],[20,0.12],[21,0.35],[22,0],[23,12],[24,0],[25,2],[26,0.45],[27,0]],
+  acid: [[0,2],[1,0],[2,2],[3,5],[4,0.35],[5,0],[6,600],[7,8],[8,0.002],[9,0.18],[10,0.15],[11,0.1],[12,0.25],[13,0.4],[14,0.3],[15,0.7],[16,0.45],[17,0.5],[18,0.15],[19,0.7],[20,0.8],[21,0.9],[22,1],[23,14],[24,0],[25,2],[26,0.35],[27,0]],
 };
+PRESETS.arp = [[0,1],[1,-12],[2,0],[3,12],[4,0.4],[5,0],[6,4200],[7,1.6],[8,0.004],[9,0.3],[10,0.0],[11,0.35],[12,0.25],[13,0.35],[14,0.22],[15,0.75],[16,0.75],[17,0.3],[18,0.4],[19,0.9],[20,0.1],[21,0.3],[22,1],[23,9],[24,2],[25,2],[26,0.5],[27,0]];
 document.querySelectorAll('.preset-list button').forEach((b) => {
   b.addEventListener('click', () => {
     for (const [id, v] of PRESETS[b.dataset.preset]) setParam(id, v, { fromPreset: true });
@@ -198,7 +213,13 @@ async function startAudio() {
       const d = e.data || {};
       if (d.type === 'ready') resolve();
       else if (d.type === 'error') reject(new Error(d.message));
-      else if (d.type === 'voices') updateVoices(d.count);
+      else if (d.type === 'voices') {
+        updateVoices(d.count, d.gated);
+        paintArpReadout(d);
+        if (d.recSeconds > 0) recReadout.textContent = `录音中… ${d.recSeconds.toFixed(1)} s`;
+      } else if (d.type === 'rec-done') {
+        onRecordingDone(d);
+      }
     };
   });
   await ready;
@@ -234,8 +255,9 @@ document.getElementById('panic-btn').addEventListener('click', () => {
   document.querySelectorAll('.key.down').forEach((k) => k.classList.remove('down'));
 });
 
-function updateVoices(count) {
-  document.getElementById('voice-badge').textContent = `VOICES ${count}/8`;
+function updateVoices(count, gated) {
+  const g = gated === undefined ? count : gated;
+  document.getElementById('voice-badge').textContent = `VOICES ${g}/8`;
 }
 
 // ---------------------------------------------------------------------------
@@ -449,3 +471,179 @@ async function runSelfTest() {
 }
 
 document.getElementById('selftest-btn').addEventListener('click', runSelfTest);
+
+// ---------------------------------------------------------------------------
+// arpeggiator panel
+
+const arpToggle = document.getElementById('arp-toggle');
+const arpLatch = document.getElementById('arp-latch');
+const arpReadout = document.getElementById('arp-readout');
+
+arpToggle.addEventListener('click', () => {
+  const on = state.params[22] < 0.5;
+  setParam(22, on ? 1 : 0);
+  paintArp();
+});
+arpLatch.addEventListener('change', () => setParam(27, arpLatch.checked ? 1 : 0));
+document.getElementById('arp-modes').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  setParam(24, Number(b.dataset.value));
+  paintArp();
+});
+
+function paintArp() {
+  const on = state.params[22] >= 0.5;
+  arpToggle.textContent = on ? 'ARP ON' : 'ARP OFF';
+  arpToggle.classList.toggle('on', on);
+  arpLatch.checked = state.params[27] >= 0.5;
+  const mode = Math.round(state.params[24]);
+  document.querySelectorAll('#arp-modes button').forEach((b) => {
+    b.classList.toggle('on', Number(b.dataset.value) === mode);
+  });
+}
+paintArp();
+
+function paintArpReadout(d) {
+  arpReadout.textContent = `steps ${d.arpSteps} · held ${d.held} · gated ${d.gated}`;
+}
+
+// ---------------------------------------------------------------------------
+// recording: capture the engine output and hand back a WAV
+
+let recorder = null;
+
+/** 16-bit PCM WAV from float channels (the offline examples use the same shape). */
+function encodeWav(channels, sampleRate) {
+  const n = channels[0].length;
+  const nc = channels.length;
+  const dataSize = n * nc * 2;
+  const buf = new ArrayBuffer(44 + dataSize);
+  const v = new DataView(buf);
+  const ascii = (off, s) => { for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i)); };
+  ascii(0, 'RIFF');
+  v.setUint32(4, 36 + dataSize, true);
+  ascii(8, 'WAVE');
+  ascii(12, 'fmt ');
+  v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true);
+  v.setUint16(22, nc, true);
+  v.setUint32(24, sampleRate, true);
+  v.setUint32(28, sampleRate * nc * 2, true);
+  v.setUint16(32, nc * 2, true);
+  v.setUint16(34, 16, true);
+  ascii(36, 'data');
+  v.setUint32(40, dataSize, true);
+  let o = 44;
+  for (let i = 0; i < n; i++) {
+    for (let c = 0; c < nc; c++) {
+      const s = Math.max(-1, Math.min(1, channels[c][i]));
+      v.setInt16(o, Math.round(s * 32767), true);
+      o += 2;
+    }
+  }
+  return buf;
+}
+
+const recBtn = document.getElementById('rec-btn');
+const recReadout = document.getElementById('rec-readout');
+
+recBtn.addEventListener('click', () => {
+  if (!state.audio) {
+    recReadout.textContent = '先点「启动音频」再录音';
+    return;
+  }
+  if (!recorder) {
+    recorder = { startedAt: performance.now() };
+    state.audio.node.port.postMessage({ type: 'rec-start' });
+    recBtn.classList.add('on');
+    recBtn.textContent = '⏹ 停止并保存';
+    recReadout.textContent = '录音中… 0.0 s';
+    return;
+  }
+  state.audio.node.port.postMessage({ type: 'rec-stop' });
+  recBtn.classList.remove('on');
+  recBtn.textContent = '⏺ 录音';
+});
+
+function onRecordingDone(d) {
+  const seconds = d.left.length / d.sampleRate;
+  recorder = null;
+  if (seconds < 0.1) {
+    recReadout.textContent = '录音太短，已丢弃';
+    return;
+  }
+  const wav = encodeWav([d.left, d.right], d.sampleRate);
+  const blob = new Blob([wav], { type: 'audio/wav' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `moonsynth-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.wav`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  recReadout.textContent =
+    `已保存 ${seconds.toFixed(1)} s / ${(wav.byteLength / 1024).toFixed(0)} KB（${d.sampleRate} Hz 立体声）`;
+}
+
+// ---------------------------------------------------------------------------
+// MIDI input: hardware keyboards drive the same note_on/note_off path
+
+const MIDI_CC = { 1: 6, 74: 7, 7: 15, 11: 18, 12: 14, 13: 20 }; // CC -> param id
+const midiBtn = document.getElementById('midi-btn');
+const midiReadout = document.getElementById('midi-readout');
+const midiHeld = new Set();
+
+midiBtn.addEventListener('click', async () => {
+  if (!navigator.requestMIDIAccess) {
+    midiReadout.textContent = '此浏览器不支持 Web MIDI';
+    return;
+  }
+  // the first request can take a moment (permission prompt), so say so
+  midiReadout.textContent = "请求授权中…（浏览器会弹出权限提示）";
+  try {
+    const access = await navigator.requestMIDIAccess();
+    const names = [...access.inputs.values()].map((i) => i.name);
+    for (const input of access.inputs.values()) input.onmidimessage = onMidi;
+    access.onstatechange = (e) => {
+      if (e.port && e.port.type === 'input') e.port.onmidimessage = onMidi;
+    };
+    midiBtn.classList.add('on');
+    midiBtn.textContent = '🎹 MIDI 已连接';
+    midiReadout.textContent = names.length
+      ? `输入：${names.join(', ')} · CC1 截止 / CC74 共振 / CC7 主控`
+      : '已授权，未发现输入设备（接入后自动生效）';
+  } catch (err) {
+    midiReadout.textContent = 'MIDI 授权被拒绝：' + (err && err.message ? err.message : err);
+  }
+});
+
+function onMidi(msg) {
+  const [status, d1, d2] = msg.data;
+  const cmd = status & 0xf0;
+  if (cmd === 0x90 && d2 > 0) {
+    midiHeld.add(d1);
+    if (state.audio) state.audio.node.port.postMessage({ type: 'note_on', note: d1, vel: d2 });
+    flashKey(d1, true);
+  } else if (cmd === 0x80 || (cmd === 0x90 && d2 === 0)) {
+    midiHeld.delete(d1);
+    if (state.audio) state.audio.node.port.postMessage({ type: 'note_off', note: d1 });
+    flashKey(d1, false);
+  } else if (cmd === 0xb0 && MIDI_CC[d1] !== undefined) {
+    const id = MIDI_CC[d1];
+    const def = Object.values(KNOBS).find((k) => k.id === id);
+    if (!def) return;
+    const t = d2 / 127;
+    const value = def.curve === 'log' ? def.min * Math.pow(def.max / def.min, t) : def.min + (def.max - def.min) * t;
+    setParam(id, value, { fromPreset: true });
+    syncControlsFromState();
+  }
+}
+
+function flashKey(note, on) {
+  document.querySelectorAll(`.key[data-note="${note}"]`).forEach((k) => {
+    k.classList.toggle('down', on);
+  });
+  if (on && note >= state.baseOctave && note <= state.baseOctave + 24) {
+    setTimeout(() => { if (!midiHeld.has(note)) flashKey(note, false); }, 200);
+  }
+}
