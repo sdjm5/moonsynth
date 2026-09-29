@@ -185,3 +185,63 @@ test "hard stop clears the reverb tank too" {
     assert_true(r[i].abs() < 0.0000001)
   }
 }
+
+///|
+test "limiter is transparent below the knee" {
+  // everything that fits inside the knee passes bit-exact
+  for x in [0.0, 0.1, -0.25, 0.5, -0.9, 0.9] {
+    assert_true(soft_limit(x, 0.9) == x)
+  }
+}
+
+///|
+test "limiter bends above the knee and never exceeds one" {
+  // continuous at the knee
+  let just_over = soft_limit(0.9001, 0.9)
+  assert_true(just_over > 0.9 && just_over < 0.9001 + 0.001)
+  // asymptotic: a 4x overshoot (what the demo track measured) lands just
+  // under full scale instead of clipping flat
+  let hot = soft_limit(4.0, 0.9)
+  assert_true(hot > 0.99 && hot <= 1.0)
+  assert_true(soft_limit(100.0, 0.9) <= 1.0)
+  // odd symmetry and monotonicity across the whole range
+  assert_true((soft_limit(2.5, 0.9) + soft_limit(-2.5, 0.9)).abs() < 0.0000001)
+  let mut prev = soft_limit(-6.0, 0.9)
+  let mut x = -6.0
+  while x < 6.0 {
+    x = x + 0.01
+    let y = soft_limit(x, 0.9)
+    assert_true(y >= prev)
+    prev = y
+  }
+}
+
+///|
+test "the engine's output stage bounds a hot mix" {
+  let synth = Synth::new(44100.0)
+  // two oscs, big reverb, every voice on: the case that used to overshoot
+  ignore(synth.set_param(4, 0.6))
+  ignore(synth.set_param(16, 1.0))
+  ignore(synth.set_param(18, 0.9))
+  ignore(synth.set_param(15, 1.0))
+  ignore(synth.set_param(9, 0.5))
+  ignore(synth.set_param(10, 1.0))
+  for n = 48; n < 56; n = n + 1 {
+    synth.note_on(n, 127)
+  }
+  ignore(synth.render(4096))
+  let (l, r) = synth.render(4096)
+  let mut peak = 0.0
+  for i = 0; i < 4096; i = i + 1 {
+    if l[i].abs() > peak {
+      peak = l[i].abs()
+    }
+    if r[i].abs() > peak {
+      peak = r[i].abs()
+    }
+    assert_true(l[i].abs() <= 1.0)
+    assert_true(r[i].abs() <= 1.0)
+  }
+  // it was loud, so the limiter was actually doing something
+  assert_true(peak > 0.95)
+}

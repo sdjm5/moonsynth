@@ -643,11 +643,13 @@ pub fn Synth::render(
     self.scratch_l[i] = l
     self.scratch_r[i] = r
   }
-  // master gain last
+  // master gain, then the output stage: a voiced-up synth plus a reverb
+  // tank overshoots ±1 easily, so the master bus is softly limited rather
+  // than left to clip in whatever writes the samples out
   let m = p.master
   for i = 0; i < nn; i = i + 1 {
-    self.scratch_l[i] = self.scratch_l[i] * m
-    self.scratch_r[i] = self.scratch_r[i] * m
+    self.scratch_l[i] = master_limit(self.scratch_l[i] * m)
+    self.scratch_r[i] = master_limit(self.scratch_r[i] * m)
   }
   (self.scratch_l, self.scratch_r)
 }
