@@ -5,3 +5,4 @@ target
 .mooncakes/
 .moonagent/
 web/synth.wasm
+out/
