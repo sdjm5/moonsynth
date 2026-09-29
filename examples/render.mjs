@@ -19,6 +19,11 @@ import { encodeWav } from './wav.mjs';
 const OUT_ADDR = 64 * 1024 * 1024;
 const BLOCK = 4096;
 
+const ARP_MODES = { up: 0, down: 1, updown: 2, random: 3, played: 4 };
+function arpModeId(name) {
+  return ARP_MODES[String(name).toLowerCase()] ?? 0;
+}
+
 const WAVES = { sine: 0, tri: 1, saw: 2, square: 3, sqr: 3 };
 const CHORDS = {
   major: [0, 4, 7],
@@ -46,6 +51,13 @@ const usage = `usage: node examples/render.mjs <wave> <note|hz> <seconds> [optio
               --detune cents   second oscillator offset (adds osc 2)
               --sr hz          sample rate (default 48000)
               --out path       output file (default out/<label>.wav)
+
+  arpeggiator --arp            walk the held notes (a chord arpeggiates; a
+                               single note becomes a rhythmic ostinato)
+              --arp-mode       up | down | updown | random | played
+              --arp-rate n     steps per second (default 8)
+              --arp-oct n      octave range 1..4 (default 1)
+              --arp-gate 0..1  note length as a fraction of a step (default 0.6)
 
   waves       sine, tri, saw, square
   chords      ${Object.keys(CHORDS).join(', ')}
@@ -82,6 +94,11 @@ const sr = Number(takeFlag('sr', 48000));
 const outFlag = takeFlag('out', null);
 const waveFlag = takeFlag('wave', null);
 // --chord / --scale are mode switches; the shape is the last positional
+const arpOn = takeSwitch('arp');
+const arpModeName = takeFlag('arp-mode', 'up');
+const arpRate = Number(takeFlag('arp-rate', 8));
+const arpOct = Number(takeFlag('arp-oct', 1));
+const arpGate = Number(takeFlag('arp-gate', 0.6));
 const isChord = takeSwitch('chord');
 const isScale = takeSwitch('scale');
 
@@ -146,6 +163,12 @@ function patch(wave) {
   set(19, 0.8); // reverb stereo width
   set(20, drive);
   set(21, drive > 0 ? 1 : 0);
+  set(22, arpOn ? 1 : 0);
+  set(23, arpRate);
+  set(24, arpModeId(arpModeName));
+  set(25, arpOct);
+  set(26, arpGate);
+  set(27, 0); // latch off: the file should end with silence
 }
 
 /** Render `seconds` of engine output, appending into two arrays. */

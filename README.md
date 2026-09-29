@@ -1,7 +1,7 @@
 # moonsynth
 
 A polyphonic browser **synthesizer** whose entire DSP core — oscillators,
-filter, envelopes, delay, reverb, drive — is written in
+filter, envelopes, delay, reverb, drive, arpeggiator — is written in
 [MoonBit](https://www.moonbitlang.com/) and compiled to WebAssembly,
 rendered sample-by-sample on the real-time audio thread through an
 `AudioWorklet`. The same library also runs offline from Node, with no
@@ -17,12 +17,20 @@ signal flow (all inside the wasm module):
                               ├─ sum ── biquad ── drive ── ping-pong delay
   8 voices ──────────────────┘        (LP/HP/BP)              │
                                                               ▼
-                                  stereo out ── master ── reverb
+                       stereo out ── limiter ── master ── reverb
+                            ▲
+                     arpeggiator schedules the voices (sample-accurate)
 ```
 
-Turn knobs, play the on-screen keyboard (or your computer keyboard), pick a
-preset, and watch the scope. The page's **offline self-test** button renders
-audio through the same engine headlessly and asserts the physics.
+Turn knobs, play the on-screen keyboard (or your computer keyboard, or a
+MIDI keyboard), record a take, and watch the scope.
+
+## Hear it
+
+[`docs/demo-music.wav`](docs/demo-music.wav) is a 14.5 s piece rendered by
+`node examples/demo.mjs` — a pad, an arpeggio over the same progression, a
+driven bass line and a closing chord left to ring. No samples, no DAW, just
+this engine.
 
 ## Highlights
 
@@ -30,30 +38,32 @@ audio through the same engine headlessly and asserts the physics.
   two-sample polynomial band-limited step. Measured: a square comes out with
   its even harmonics at machine epsilon and its odd harmonics at exactly 1/n
   (f/3 and f/5 to three decimals).
-- **RBJ cookbook biquad** — low-pass / high-pass / band-pass with resonance,
-  coefficients recomputed only on parameter changes.
+- **RBJ cookbook biquad** — low-pass / high-pass / band-pass with resonance.
 - **Linear ADSR** per voice, with release rates captured at gate-off so
   parameter tweaks can't make a releasing voice click.
-- **Ping-pong delay** — one impulse echoes left, right, left… with feedback.
-- **Freeverb reverb** — eight damped comb filters into four series allpasses
-  per channel, right-channel lines offset by 23 samples for a decorrelated
-  stereo image; room size, damping, wet and width are live controls. Measured:
-  it stretches a 1 s note into a 2.64 s tail.
-- **Soft-clip drive** — the cubic clipper `x(27 + x²)/(27 + 9x²)`, with
-  makeup that keeps a full-scale input near unity so drive adds harmonics
-  instead of just losing loudness. Measured: it lifts a pure sine's third
-  harmonic from 6e-7 to 0.127.
+- **Ping-pong delay** and **Freeverb reverb** (eight damped combs into four
+  series allpasses per channel, 23-sample stereo spread). Measured: the
+  reverb stretches a 1 s note into a 2.64 s tail.
+- **Soft-clip drive** — the cubic clipper `x(27 + x²)/(27 + 9x²)`. Measured:
+  it lifts a pure sine's third harmonic from 6e-7 to 0.127.
+- **Arpeggiator inside the engine** — five modes (up, down, up-down, random,
+  as-played), octave range 1–4, rate 0.5–40 steps/s, gate, latch. Steps are
+  scheduled in the sample loop, so they land on exact sample boundaries
+  instead of wherever a JavaScript timer fires.
+- **Recording** — the worklet taps the engine output into buffers allocated
+  once at startup, and hands back a 16-bit PCM WAV you can download.
+- **MIDI input** — Web MIDI note on/off plus CC mapping (CC1 cutoff, CC74
+  resonance, CC7 master, CC11 reverb wet, CC12 delay wet, CC13 drive).
+- **Output stage that does not clip** — a soft-knee limiter, transparent
+  below 0.9 and asymptotic to ±1 above it. It exists because the demo track
+  measured a peak of 4.0 before it: eight voices, two oscillators each, a
+  reverb tank and a delay add up fast.
 - **8-voice polyphony** with note retrigger, idle-voice reuse and
-  oldest-voice stealing; PANIC hard-silences everything including the reverb
-  tank.
-- **Zero-allocation render path** — voices, scratch buffers, delay lines and
-  reverb tanks are preallocated; the per-block render never allocates, so the
-  wasm GC never interrupts the audio thread mid-block.
+  oldest-voice stealing; PANIC silences everything including the reverb tank.
+- **Zero-allocation render path** — voices, scratch buffers, delay lines,
+  reverb tanks and the arpeggiator pattern are all preallocated.
 
 ## Use it as a library, offline
-
-`examples/` drives the wasm module from Node and writes playable WAV files —
-no browser, no audio device:
 
 ```
 moon build --target wasm --release
@@ -62,17 +72,20 @@ cp _build/wasm/release/build/src/kernel/kernel.wasm web/synth.wasm
 node examples/render.mjs sine A4 2                 # 2 s of 440 Hz
 node examples/render.mjs square C3 1.5 --drive 0.6
 node examples/render.mjs saw A3 3 --reverb 0.9
+node examples/render.mjs sine A3 3 --arp --arp-mode updown --arp-oct 2
 node examples/render.mjs sine 432 2                # a raw frequency, hit exactly
 node examples/render.mjs --chord C4 3 major        # C E G
 node examples/render.mjs --scale C4 0.3 minor      # eight notes in a row
+node examples/demo.mjs                             # the demo track above
 
-node examples/test-render.mjs                      # 16/16 checks
+node examples/test-render.mjs                      # 21/21 checks
 ```
 
 Note names (`A4`, `C#3`, `Eb5`) are converted through equal temperament; a
 bare number is treated as Hz and reached exactly by picking the nearest note
 and applying the remainder as cents detune. See
-[examples/README.md](examples/README.md) for the measured spectra table.
+[examples/README.md](examples/README.md) for the measured spectra table and
+for one measurement trap worth knowing about.
 
 ## The wasm ↔ AudioWorklet boundary
 
@@ -101,12 +114,14 @@ Two more findings encoded in the code:
 ```
 src/lib/        portable pure-MoonBit DSP: PolyBLEP oscillators, RBJ biquad,
                 ADSR, ping-pong delay, Freeverb reverb, soft-clip drive,
-                8-voice engine (25 unit tests)
+                soft-knee limiter, arpeggiator, 8-voice engine (45 unit tests)
 src/kernel/     wasm foreign_library: moon_init / note_on / note_off /
-                set_param / panic / voice_count / render (linear-memory out)
-web/            rack UI (18 knobs, 5 presets, keyboard, scope+spectrum,
-                offline self-test), audio-worklet.js, zero-dependency server
-examples/       Node CLI that renders WAV files + spectral verification
+                set_param / panic / render / arp_steps / gated_count / ...
+web/            rack UI (21 knobs, 6 presets, arpeggiator panel, recording,
+                MIDI, keyboard, scope+spectrum), audio-worklet.js,
+                zero-dependency server
+examples/       shared engine driver, single-tone CLI, demo track builder,
+                WAV helpers and the spectral verification suite
 ```
 
 ## Try it
@@ -119,9 +134,10 @@ node web/server.mjs 8090
 ```
 
 Then: **▶ 启动音频** (browsers require one user gesture), pick a preset, and
-play with `A W S E D F T G Y H U J K…` (`Z`/`X` shift octaves). Drag knobs
-vertically; double-click a knob to reset it. Presets: Init Saw, Fat Bass,
-Dreamy Pad (big reverb), Pluck, Acid 303 (driven).
+play with `A W S E D F T G Y H U J K…` (`Z`/`X` shift octaves). Presets: Init
+Saw, Fat Bass, Dreamy Pad, Pluck, Acid 303 (driven, arpeggiated), Arp Pluck.
+Press **⏺ 录音** to capture a take as WAV, and **🎹 连接 MIDI** for a hardware
+keyboard.
 
 ## Performance
 
@@ -131,16 +147,17 @@ render allocates nothing.
 
 ## Tests
 
-- **DSP library**: `moon test` — **25 tests**. Closed-form checks where the
+- **DSP library**: `moon test` — **45 tests**. Closed-form checks where the
   math is exact (envelope timing, filter impulse response summing to 1, delay
-  echoes landing on samples 50/100/150, reverb tail decay and stability at
-  maximum room size, the shaper's odd/monotonic/saturating transfer curve) and
-  statistical bounds where the subject is signal shape.
-- **Offline renderer**: `node examples/test-render.mjs` — **16 checks** that
-  spawn the CLI, decode the WAVs and measure their spectra against theory.
-- **In-browser self-test** — offline render through the full worklet stack:
-  attack RMS > 0.02, post-release RMS < 0.001, zero-crossing rate within
-  230–290/s for a C4 sine.
+  echoes landing on samples 50/100/150, reverb decay and stability at maximum
+  room size, the shaper's transfer curve, limiter transparency and bounding,
+  arpeggiator pattern order/octaves/bounce/range) plus engine-level behavior.
+- **Offline renderer**: `node examples/test-render.mjs` — **21 checks** that
+  spawn the CLIs, decode the WAVs and measure them: waveform spectra against
+  theory, equal-tempered pitch, drive and reverb effects, and the demo track
+  (duration, no clipping, every section audible, the arpeggio reaching an
+  octave the pad cannot).
+- **In-browser self-test** — offline render through the full worklet stack.
 - **Kernel**: `node web/test-kernel.mjs` — **10 checks** over the wasm
   boundary, including a real-time factor budget.
 

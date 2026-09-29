@@ -164,5 +164,64 @@ check(
   `L ${rms(sineWav.channels[0]).toFixed(3)}, R ${rms(sineWav.channels[1]).toFixed(3)}`,
 );
 
+// --- the demo track ---------------------------------------------------------
+// A four-section piece built by examples/demo.mjs. Two things it has to prove:
+// the output stage keeps the mix inside full scale, and the arpeggiator really
+// gated the arpeggio section (a sustained chord would be flat).
+
+const demoOut = 'out/test/demo.wav';
+const demoLog = execFileSync(process.execPath, ['examples/demo.mjs', demoOut], { encoding: 'utf8' });
+const demo = decodeWav(readFileSync(demoOut));
+const demoSeconds = demo.frames / demo.sampleRate;
+check(
+  `demo renders a multi-section track (${demoSeconds.toFixed(2)} s)` ,
+  demoSeconds > 13 && demoSeconds < 16,
+  demoOut,
+);
+
+let demoPeak = 0;
+for (const ch of demo.channels) {
+  for (let i = 0; i < ch.length; i++) demoPeak = Math.max(demoPeak, Math.abs(ch[i]));
+}
+check(
+  `demo stays inside full scale (peak ${demoPeak.toFixed(3)})`,
+  demoPeak <= 1.0,
+  'the output stage limited what the raw mix overshot',
+);
+
+const sections = [
+  ['pad', 0.3, 4.0],
+  ['arpeggio', 4.5, 8.2],
+  ['bass', 8.8, 11.0],
+  ['outro', 11.4, 14.2],
+];
+const levels = sections.map(([name, a, b]) => [
+  name,
+  rms(demo.channels[0].slice(Math.round(a * SR), Math.round(b * SR))),
+]);
+check(
+  'every demo section carries audio',
+  levels.every(([, l]) => l > 0.05),
+  levels.map(([n, l]) => n + ' ' + l.toFixed(3)).join(', '),
+);
+
+// The arpeggio runs two octaves, so its section must contain A4 while the pad
+// (an A3/C4/E4 chord) cannot. Envelope comparisons do not separate the two —
+// the pad is detuned and beats, which looks like modulation too — but an
+// octave-up partial can only come from the pattern stacking.
+const padA4 = goertzel(demo.channels[0].slice(Math.round(0.4 * SR), Math.round(4.0 * SR)), 440, SR);
+const arpA4 = goertzel(demo.channels[0].slice(Math.round(4.5 * SR), Math.round(8.2 * SR)), 440, SR);
+check(
+  `the arpeggio section reaches an octave the pad cannot (A4 ${(arpA4 / padA4).toFixed(0)}x stronger)` ,
+  arpA4 > padA4 * 10,
+  `A4 energy: arp ${arpA4.toExponential(2)}, pad ${padA4.toExponential(2)}` ,
+);
+const steps = Number((/arp took (\d+) steps/.exec(demoLog) || [])[1]);
+check(
+  `the arpeggiator stepped through the progression (${steps} steps)` ,
+  steps > 30,
+  'ten steps a second across four one-second chords',
+);
+
 console.log(`\n${passed}/${total} checks passed`);
 process.exit(passed === total ? 0 : 1);
