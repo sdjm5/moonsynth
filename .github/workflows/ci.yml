@@ -19,8 +19,10 @@ jobs:
       - name: Test (DSP library)
         run: moon test
       - name: Build wasm kernel
-        run: moon build --target wasm
-      - name: Kernel smoke test
+        run: moon build --target wasm --release
+      - name: Kernel end-to-end tests
         run: |
-          cp _build/wasm/debug/build/src/kernel/kernel.wasm web/synth.wasm
+          cp _build/wasm/release/build/src/kernel/kernel.wasm web/synth.wasm
           node web/test-kernel.mjs
+      - name: Offline renderer spectra
+        run: node examples/test-render.mjs
