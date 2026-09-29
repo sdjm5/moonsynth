@@ -43,7 +43,9 @@ pub fn note_off(note : Int) -> Unit {
 /// Set one parameter by id. Ids: 0 osc1_wave, 1 osc1_detune (cents),
 /// 2 osc2_wave, 3 osc2_detune, 4 osc2_mix, 5 filter_type, 6 cutoff (Hz),
 /// 7 resonance Q, 8 attack (s), 9 decay (s), 10 sustain, 11 release (s),
-/// 12 delay_time (s), 13 delay_feedback, 14 delay_mix, 15 master gain.
+/// 12 delay_time (s), 13 delay_feedback, 14 delay_mix, 15 master gain,
+/// 16 reverb_size, 17 reverb_damp, 18 reverb_mix, 19 reverb_width,
+/// 20 drive_amount, 21 drive_mix.
 #export_name("set_param")
 pub fn set_param(id : Int, value : Float) -> Unit {
   match engine.val {

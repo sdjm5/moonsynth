@@ -2,12 +2,12 @@
 // block renderer the wasm kernel drives.
 //
 // Signal flow per voice:  osc1 + osc2 (detuned, mixed) -> ADSR amp
-// summed across voices -> global biquad filter -> master gain
-// -> ping-pong delay (stereo) -> out.
+// summed across voices -> global biquad filter -> drive (soft clip)
+// -> ping-pong delay -> reverb -> master gain -> out.
 //
-// Everything is preallocated: voices, scratch buffers, delay lines. The
-// render path allocates nothing, so it never disturbs the GC while the
-// audio thread is pulling blocks.
+// Everything is preallocated: voices, scratch buffers, delay lines, reverb
+// tanks. The render path allocates nothing, so it never disturbs the GC
+// while the audio thread is pulling blocks.
 
 ///|
 pub struct Params {
@@ -23,6 +23,12 @@ pub struct Params {
   mut decay : Double
   mut sustain : Double
   mut release : Double
+  mut reverb_size : Double // 0..1
+  mut reverb_damp : Double // 0..1
+  mut reverb_mix : Double // 0..1 wet
+  mut reverb_width : Double // 0..1 stereo
+  mut drive : Double // 0..1
+  mut drive_mix : Double // 0..1
   mut master : Double // 0..1
 }
 
@@ -43,7 +49,9 @@ pub struct Synth {
   sr : Double
   params : Params
   filter : Biquad
+  drive : Drive
   delay : PingPong
+  reverb : Reverb
   voices : Array[Voice]
   scratch_l : FixedArray[Double]
   scratch_r : FixedArray[Double]
@@ -68,6 +76,12 @@ pub fn Synth::new(sr : Double) -> Synth {
     decay: 0.15,
     sustain: 0.6,
     release: 0.25,
+    reverb_size: 0.5,
+    reverb_damp: 0.3,
+    reverb_mix: 0.0, // reverb off until a patch asks for it
+    reverb_width: 0.8,
+    drive: 0.0,
+    drive_mix: 0.0,
     master: 0.7,
   }
   let voices : Array[Voice] = []
@@ -87,7 +101,9 @@ pub fn Synth::new(sr : Double) -> Synth {
     sr,
     params,
     filter: Biquad::new(FLP),
+    drive: Drive::new(),
     delay: PingPong::new(sr),
+    reverb: Reverb::new(sr),
     voices,
     scratch_l: FixedArray::make(4096, 0.0),
     scratch_r: FixedArray::make(4096, 0.0),
@@ -186,6 +202,7 @@ pub fn Synth::panic(self : Synth) -> Unit {
   }
   self.filter.clear()
   self.delay.clear()
+  self.reverb.clear()
 }
 
 ///|
@@ -222,6 +239,12 @@ pub fn Synth::set_param(self : Synth, id : Int, value : Double) -> Bool {
     13 => self.delay.feedback = value
     14 => self.delay.mix = dclamp(value, 0.0, 1.0)
     15 => p.master = dclamp(value, 0.0, 1.0)
+    16 => p.reverb_size = dclamp(value, 0.0, 1.0)
+    17 => p.reverb_damp = dclamp(value, 0.0, 1.0)
+    18 => p.reverb_mix = dclamp(value, 0.0, 1.0)
+    19 => p.reverb_width = dclamp(value, 0.0, 1.0)
+    20 => p.drive = dclamp(value, 0.0, 1.0)
+    21 => p.drive_mix = dclamp(value, 0.0, 1.0)
     _ => return false
   }
   if id == 5 || id == 6 || id == 7 {
@@ -235,6 +258,18 @@ pub fn Synth::set_param(self : Synth, id : Int, value : Double) -> Bool {
       v.env.sustain = p.sustain
       v.env.release = p.release
     }
+  }
+  if id == 16 || id == 17 {
+    self.reverb.set_room(p.reverb_size, p.reverb_damp)
+  }
+  if id == 18 {
+    self.reverb.mix = p.reverb_mix
+  }
+  if id == 19 {
+    self.reverb.width = p.reverb_width
+  }
+  if id == 20 || id == 21 {
+    self.drive.set(p.drive, p.drive_mix)
   }
   true
 }
@@ -268,9 +303,9 @@ pub fn Synth::render(
     self.scratch_l[i] = acc
     self.scratch_r[i] = acc
   }
-  // global filter + master
+  // global filter -> drive
   for i = 0; i < nn; i = i + 1 {
-    let y = self.filter.process(self.scratch_l[i]) * p.master
+    let y = self.drive.process(self.filter.process(self.scratch_l[i]))
     self.scratch_l[i] = y
     self.scratch_r[i] = y
   }
@@ -279,6 +314,18 @@ pub fn Synth::render(
     let (l, r) = self.delay.process(self.scratch_l[i])
     self.scratch_l[i] = l
     self.scratch_r[i] = r
+  }
+  // reverb
+  for i = 0; i < nn; i = i + 1 {
+    let (l, r) = self.reverb.process(self.scratch_l[i], self.scratch_r[i])
+    self.scratch_l[i] = l
+    self.scratch_r[i] = r
+  }
+  // master gain last
+  let m = p.master
+  for i = 0; i < nn; i = i + 1 {
+    self.scratch_l[i] = self.scratch_l[i] * m
+    self.scratch_r[i] = self.scratch_r[i] * m
   }
   (self.scratch_l, self.scratch_r)
 }
