@@ -45,7 +45,9 @@ pub fn note_off(note : Int) -> Unit {
 /// 7 resonance Q, 8 attack (s), 9 decay (s), 10 sustain, 11 release (s),
 /// 12 delay_time (s), 13 delay_feedback, 14 delay_mix, 15 master gain,
 /// 16 reverb_size, 17 reverb_damp, 18 reverb_mix, 19 reverb_width,
-/// 20 drive_amount, 21 drive_mix.
+/// 20 drive_amount, 21 drive_mix, 22 arp_on, 23 arp_rate (steps/s),
+/// 24 arp_mode (0 up, 1 down, 2 up-down, 3 random, 4 as-played),
+/// 25 arp_octaves, 26 arp_gate, 27 arp_latch.
 #export_name("set_param")
 pub fn set_param(id : Int, value : Float) -> Unit {
   match engine.val {
@@ -61,6 +63,46 @@ pub fn panic_all() -> Unit {
   match engine.val {
     Some(s) => s.panic()
     None => ()
+  }
+}
+
+///|
+/// Steps the arpeggiator has taken — its odometer.
+#export_name("arp_steps")
+pub fn arp_steps() -> Int {
+  match engine.val {
+    Some(s) => s.arp_steps()
+    None => 0
+  }
+}
+
+///|
+/// Keys currently held (latch included).
+#export_name("held_count")
+pub fn held_count() -> Int {
+  match engine.val {
+    Some(s) => s.held_count()
+    None => 0
+  }
+}
+
+///|
+/// Voices with their gate still down (release tails excluded).
+#export_name("gated_count")
+pub fn gated_count() -> Int {
+  match engine.val {
+    Some(s) => s.gated_voices()
+    None => 0
+  }
+}
+
+///|
+/// Last note the arpeggiator triggered (-1 before the first step).
+#export_name("arp_last_note")
+pub fn arp_last_note() -> Int {
+  match engine.val {
+    Some(s) => s.arp_last_note()
+    None => -1
   }
 }
 
